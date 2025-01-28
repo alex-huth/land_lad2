@@ -106,6 +106,7 @@ use predefined_tiles_mod, only: land_cover_cold_start_0d_predefined_tiles,&
 use mpp_domains_mod, only: domainUG
 use mpp_domains_mod, only: mpp_get_UG_compute_domain
 use mpp_domains_mod, only: mpp_get_UG_domain_grid_index
+use mpp_efp_mod,     only: mpp_reproducing_sum
 use diag_axis_mod,   only: diag_axis_add_attribute
 
 use fms2_io_mod, only: read_data, get_mosaic_tile_file, open_file, &
@@ -1109,6 +1110,7 @@ subroutine update_land_model_fast ( cplr2land, land2cplr )
     IS_adot_sg = 0
     call mpp_pass_UG_to_SG(lnd%ug_domain, IS_adot,   IS_adot_sg  )
     land2cplr%IS_adot_sg = IS_adot_sg
+    land2cplr%IS_adot_int = mpp_reproducing_sum(IS_adot_sg * lnd%sg_cellarea)
   endif
 
   call get_watch_point(iwatch,jwatch,kwatch,face)
@@ -3821,6 +3823,7 @@ subroutine realloc_land2cplr ( bnd )
      bnd%discharge_snow_heat = 0.0
   endif
 
+  bnd%IS_adot_int = 0.0
   if (IS_enabled .and. .not.associated(bnd%IS_mask_sg)) then
      allocate( bnd%IS_adot_sg          (lnd%is:lnd%ie, lnd%js:lnd%je) )
      bnd%IS_adot_sg           = 0.0
