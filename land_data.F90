@@ -116,11 +116,11 @@ type :: land_data_type
      !IS_adot_heat     => NULL()     ! sensible heat of IS_adot (0 C datum)
 
    real, pointer, dimension(:,:) :: &
-     !IS_adot_ug          => NULL(), &      ! surface mass flux to ice sheet, (kg m-2 s-1)
      IS_mask_ug          => NULL()         ! ice sheet mask for passing mass fluxes via the coupler to MOM6
      !IS_adot_heat     => NULL()     ! sensible heat of IS_adot (0 C datum)
 
-   real :: IS_adot_int = 0. ! The area-integrated surface mass flux to the ice sheet, (kg s-1)
+
+   real :: IS_adot_int ! The area-integrated surface mass flux to the ice sheet, (kg s-1)
    logical, pointer, dimension(:,:):: &
         mask => NULL()          ! true if land
 

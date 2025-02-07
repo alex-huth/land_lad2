@@ -984,9 +984,10 @@ end subroutine land_cover_warm_start_new
 
 
 ! ============================================================================
-subroutine update_land_model_fast ( cplr2land, land2cplr )
+subroutine update_land_model_fast ( cplr2land, land2cplr, na)
   type(atmos_land_boundary_type), intent(in)    :: cplr2land
   type(land_data_type)          , intent(inout) :: land2cplr
+  integer, intent(in) :: na !< Current fast atmostphere iteration
 
   ! ---- local vars
   real :: &
@@ -1006,7 +1007,7 @@ subroutine update_land_model_fast ( cplr2land, land2cplr )
 
   real, dimension(lnd%is:lnd%ie,lnd%js:lnd%je) :: runoff_sg
   real, dimension(lnd%is:lnd%ie,lnd%js:lnd%je,n_river_tracers) :: runoff_c_sg
-  real, dimension(lnd%is:lnd%ie,lnd%js:lnd%je) :: IS_adot_sg
+  real, dimension(lnd%is:lnd%ie,lnd%js:lnd%je) :: IS_adot_sg !kg m-2 s-1
   !real, dimension(lnd%is:lnd%ie,lnd%js:lnd%je,n_river_tracers) :: IS_adot_c_sg
 
   real, dimension(lnd%ls:lnd%le) :: &
@@ -1107,10 +1108,21 @@ subroutine update_land_model_fast ( cplr2land, land2cplr )
   call mpp_pass_UG_to_SG(lnd%ug_domain, runoff_c, runoff_c_sg)
   !--- pass IS_adot from unstructured grid to structured grid.
   if (IS_enabled) then
+    if (na==1) then
+      land2cplr%IS_adot_sg = 0.0
+      land2cplr%IS_adot_int = 0.0
+    endif
     IS_adot_sg = 0
     call mpp_pass_UG_to_SG(lnd%ug_domain, IS_adot,   IS_adot_sg  )
-    land2cplr%IS_adot_sg = IS_adot_sg
-    land2cplr%IS_adot_int = mpp_reproducing_sum(IS_adot_sg * lnd%sg_cellarea)
+    land2cplr%IS_adot_sg = land2cplr%IS_adot_sg + &
+                           IS_adot_sg * time_type_to_real(lnd%dt_fast)/time_type_to_real(lnd%dt_slow)
+    land2cplr%IS_adot_int = land2cplr%IS_adot_int + &
+                            mpp_reproducing_sum(IS_adot_sg * lnd%sg_cellarea) * &
+                            time_type_to_real(lnd%dt_fast)/time_type_to_real(lnd%dt_slow)
+    if (mpp_pe() == mpp_root_pe()) then
+      print *,''
+      print *,'land%IS_adot_int',land2cplr%IS_adot_int
+    endif
   endif
 
   call get_watch_point(iwatch,jwatch,kwatch,face)
@@ -3823,30 +3835,22 @@ subroutine realloc_land2cplr ( bnd )
      bnd%discharge_snow_heat = 0.0
   endif
 
-  bnd%IS_adot_int = 0.0
-  if (IS_enabled .and. .not.associated(bnd%IS_mask_sg)) then
-     allocate( bnd%IS_adot_sg          (lnd%is:lnd%ie, lnd%js:lnd%je) )
-     bnd%IS_adot_sg           = 0.0
-     allocate( bnd%IS_mask_sg          (lnd%is:lnd%ie, lnd%js:lnd%je) )
-     bnd%IS_mask_sg           = 0.0
-     allocate( bnd%IS_mask_ug          (lnd%ls:lnd%le,1) )
-     bnd%IS_mask_ug           = 0.0
-  endif
+  if ((IS_enabled .or. IS_calving) .and. (.not.associated(bnd%IS_mask_sg))) then
+    if (IS_enabled) then
+      allocate( bnd%IS_adot_sg          (lnd%is:lnd%ie, lnd%js:lnd%je) )
+      bnd%IS_adot_sg           = 0.0
+    endif
+    allocate( bnd%IS_mask_sg          (lnd%is:lnd%ie, lnd%js:lnd%je) )
+    bnd%IS_mask_sg           = 0.0
+    allocate( bnd%IS_mask_ug          (lnd%ls:lnd%le,1) )
+    bnd%IS_mask_ug           = 0.0
 
-  if (IS_calving .and. .not.associated(bnd%IS_mask_sg)) then
-     allocate( bnd%IS_mask_sg          (lnd%is:lnd%ie, lnd%js:lnd%je) )
-     bnd%IS_mask_sg           = 0.0
-     allocate( bnd%IS_mask_ug          (lnd%ls:lnd%le,1) )
-     bnd%IS_mask_ug           = 0.0
-  endif
-
-  if (IS_enabled .or. IS_calving) then
-     success=open_file(maskfileobj_IS,'INPUT_lndXIS/land_mask.nc','read',lnd%sg_domain)
-     if (.not. success) call error_mesg('realloc_land2cplr','Error opening IS mask file',FATAL)
-     call read_data(maskfileobj_IS,'mask',bnd%IS_mask_sg)
-     call close_file(maskfileobj_IS)
-     call mpp_pass_SG_to_UG(lnd%ug_domain, bnd%IS_mask_sg,  IS_mask_ug  )
-     bnd%IS_mask_ug(:,1)=IS_mask_ug
+    success=open_file(maskfileobj_IS,'INPUT_lndXIS/land_mask.nc','read',lnd%sg_domain)
+    if (.not. success) call error_mesg('realloc_land2cplr','Error opening IS mask file',FATAL)
+    call read_data(maskfileobj_IS,'mask',bnd%IS_mask_sg)
+    call close_file(maskfileobj_IS)
+    call mpp_pass_SG_to_UG(lnd%ug_domain, bnd%IS_mask_sg,  IS_mask_ug  )
+    bnd%IS_mask_ug(:,1)=IS_mask_ug
   endif
 
 end subroutine realloc_land2cplr
