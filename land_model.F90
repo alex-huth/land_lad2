@@ -1119,10 +1119,6 @@ subroutine update_land_model_fast ( cplr2land, land2cplr, na)
     land2cplr%IS_adot_int = land2cplr%IS_adot_int + &
                             mpp_reproducing_sum(IS_adot_sg * lnd%sg_cellarea) * &
                             time_type_to_real(lnd%dt_fast)/time_type_to_real(lnd%dt_slow)
-    if (mpp_pe() == mpp_root_pe()) then
-      print *,''
-      print *,'land%IS_adot_int',land2cplr%IS_adot_int
-    endif
   endif
 
   call get_watch_point(iwatch,jwatch,kwatch,face)
