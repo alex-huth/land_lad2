@@ -97,7 +97,6 @@ type :: land_data_type
         rough_heat     => NULL(),  & ! roughness length for tracers and heat, m
         rough_scale    => NULL()     ! topographic scaler for momentum drag, m
 
-
    real, pointer, dimension(:,:,:)   :: &  ! (grid index, tile, tracer)
         tr    => NULL()              ! tracers, including canopy air specific humidity
 
@@ -111,14 +110,14 @@ type :: land_data_type
      discharge_snow_heat => NULL()     ! sensible heat of discharge_snow (0 C datum)
 
    real, pointer, dimension(:,:) :: &
-     IS_adot_sg          => NULL(), &      ! surface mass flux to ice sheet, (kg m-2 s-1)
+     IS_adot_sg          => NULL(), &      ! surface mass flux to ice sheet, per glacier area (kg m-2 s-1)
+     IS_adot_f_sg        => NULL(), &      ! surface mass flux to ice sheet, per land area (kg m-2 s-1)
      IS_mask_sg          => NULL()         ! ice sheet mask for passing mass fluxes via the coupler to MOM6
      !IS_adot_heat     => NULL()     ! sensible heat of IS_adot (0 C datum)
 
    real, pointer, dimension(:,:) :: &
      IS_mask_ug          => NULL()         ! ice sheet mask for passing mass fluxes via the coupler to MOM6
      !IS_adot_heat     => NULL()     ! sensible heat of IS_adot (0 C datum)
-
 
    real :: IS_adot_int ! The area-integrated surface mass flux to the ice sheet, (kg s-1)
    logical, pointer, dimension(:,:):: &
