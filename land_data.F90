@@ -118,9 +118,6 @@ type :: land_data_type
    real, pointer, dimension(:,:) :: &
      IS_mask_ug          => NULL()         ! ice sheet mask for passing mass fluxes via the coupler to MOM6
 
-   real, pointer, dimension(:) :: &
-     IS_stock            => NULL()
-
    real :: IS_adot_int ! The area-integrated surface mass flux to the ice sheet, (kg s-1)
 
    logical, pointer, dimension(:,:):: &

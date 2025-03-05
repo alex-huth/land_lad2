@@ -1093,8 +1093,7 @@ subroutine update_land_model_fast ( cplr2land, land2cplr, na)
   real, dimension(lnd%ls:lnd%le) :: &
        runoff, &            ! total (liquid+snow) runoff accumulated over tiles in cell
        IS_adot, &           ! Ice sheet top mass flux boundary condition per glacier area, kg m-2 s-1
-       IS_mask, &           ! Ice sheet mask
-       IS_stock_inc         ! Increment of ice shelf water stock
+       IS_mask              ! Ice sheet mask
   real, dimension(lnd%ls:lnd%le,n_river_tracers) :: &
        runoff_c          ! runoff of tracers accumulated over tiles in cell (including ice and heat)
        !IS_adot_c         ! Ice sheets currently do not include tracers
@@ -1136,7 +1135,7 @@ subroutine update_land_model_fast ( cplr2land, land2cplr, na)
   ! clear the runoff values, for accumulation over the tiles
   runoff = 0 ; runoff_c = 0
 
-  IS_adot = 0; IS_stock_inc = 0
+  IS_adot = 0
 
   ntot = int(time_type_to_real(lnd%dt_slow)/time_type_to_real(lnd%dt_fast))
 
@@ -1147,7 +1146,7 @@ subroutine update_land_model_fast ( cplr2land, land2cplr, na)
 !$OMP parallel do default(none) shared(lnd,land_tile_map,cplr2land,land2cplr,phot_co2_overridden, &
 !$OMP                                  phot_co2_data,runoff,runoff_c,id_area,id_z0m,id_z0s,       &
 !$OMP                                  id_Trad,id_Tca,id_qca,isphum,id_cd_m,id_cd_t,IS_adot,      &
-!$OMP                                  IS_enabled,IS_stock_inc) &
+!$OMP                                  IS_enabled) &
 !$OMP                                  private(i1,i,j,k,ce,tile,ISa_dn_dir,ISa_dn_dif)
   do l = lnd%ls, lnd%le
      i = lnd%i_index(l)
@@ -1172,7 +1171,7 @@ subroutine update_land_model_fast ( cplr2land, land2cplr, na)
            ISa_dn_dir, ISa_dn_dif, cplr2land%lwdn_flux(l,k), &
            cplr2land%ustar(l,k), cplr2land%p_surf(l,k), cplr2land%drag_q(l,k), &
            phot_co2_overridden, phot_co2_data(l),&
-           runoff(l), runoff_c(l,:), IS_adot(l), IS_stock_inc(l) &
+           runoff(l), runoff_c(l,:), IS_adot(l) &
         )
         ! some of the diagnostic variables are sent from here, purely for coding
         ! convenience: the compute domain-level 2d and 3d vars are generally not
@@ -1189,8 +1188,6 @@ subroutine update_land_model_fast ( cplr2land, land2cplr, na)
     enddo
   enddo
 
-  if (associated(land2cplr%IS_stock)) &
-    land2cplr%IS_stock = land2cplr%IS_stock + IS_stock_inc * lnd%ug_area * time_type_to_real(lnd%dt_fast)
   !--- pass runoff from unstructured grid to structured grid.
   runoff_sg = 0 ; runoff_c_sg = 0
   call mpp_pass_UG_to_SG(lnd%ug_domain, runoff,   runoff_sg  )
@@ -1371,7 +1368,7 @@ subroutine update_land_model_fast_0d(tile, l, k, land2cplr, &
    ISa_dn_dir, ISa_dn_dif, ILa_dn, &
    ustar, p_surf, drag_q, &
    phot_co2_overridden, phot_co2_data, &
-   runoff, runoff_c, IS_adot, IS_stock_inc &
+   runoff, runoff_c, IS_adot &
    )
   type (land_tile_type), pointer :: tile
   type(land_data_type), intent(inout) :: land2cplr
@@ -1395,8 +1392,7 @@ subroutine update_land_model_fast_0d(tile, l, k, land2cplr, &
        runoff, &   ! total runoff of H2O
        runoff_c(:) ! runoff of tracers (including ice/snow and heat)
   real, intent(inout) :: &
-       IS_adot, &  ! mass flux to pass to ice sheet model, per glacier area, kg m-2 s-1
-       IS_stock_inc! increment of ice shelf stock (ice that would otherwise be runoff - surface mass flux)
+       IS_adot     ! mass flux to pass to ice sheet model, per glacier area, kg m-2 s-1
 
   ! ---- local constants
   ! indices of variables and equations for implicit time stepping solution :
@@ -2019,10 +2015,11 @@ subroutine update_land_model_fast_0d(tile, l, k, land2cplr, &
                    - subs_melt - subs_levap - subs_fevap)
 
          ! Store the runoff on the ice sheet that will not enter the river, minus the adot that
-         ! will be sent to MOM. [kg/s per area_land]
-         IS_stock_inc = IS_stock_inc + (snow_frunf - &
-                                        (vegn_fprec + vegn_lprec - snow_lrunf - snow_levap - snow_fevap &
-                                         - subs_melt - subs_levap - subs_fevap)) * IS_frac
+         ! will be sent to MOM. [kg]
+         tile%glac%IS_stock = tile%glac%IS_stock + (snow_frunf - &
+                                         (vegn_fprec + vegn_lprec - snow_lrunf - snow_levap - snow_fevap &
+                                         - subs_melt - subs_levap - subs_fevap)) * &
+                                         IS_frac * lnd%ug_area(l) * delta_time
        endif
      endif
 
@@ -3011,8 +3008,10 @@ case(ISTOCK_WATER)
         call cana_state ( tile%cana, cana_q=cana_q )
         twd_gas_cana = canopy_air_mass*cana_q
         endif
-      if(associated(tile%glac)) &
+      if(associated(tile%glac)) then
         call glac_tile_stock_pe(tile%glac, twd_liq_glac, twd_sol_glac)
+        v_IS = v_IS + tile%glac%IS_stock
+      endif
       if(associated(tile%lake)) &
         call lake_tile_stock_pe(tile%lake, twd_liq_lake, twd_sol_lake)
       if(associated(tile%soil)) &
@@ -3034,7 +3033,6 @@ case(ISTOCK_WATER)
     v_soil = v_soil + gcwd_soil * lnd%ug_area(l)*area_factor
     v_snow = v_snow + gcwd_snow * lnd%ug_area(l)*area_factor
     v_vegn = v_vegn + gcwd_vegn * lnd%ug_area(l)*area_factor
-    if (associated(bnd%IS_stock)) v_IS = v_IS + bnd%IS_stock(l)
   enddo
   value  = v_cana + v_glac + v_lake + v_soil + v_snow + v_vegn + v_IS
 
@@ -3997,9 +3995,6 @@ subroutine realloc_land2cplr ( bnd )
     allocate( bnd%IS_mask_ug          (lnd%ls:lnd%le,1) )
     bnd%IS_mask_ug           = 0.0
 
-    allocate( bnd%IS_stock          (lnd%ls:lnd%le) )
-    bnd%IS_stock           = 0.0
-
     success=open_file(maskfileobj_IS,'./INPUT_lndXIS/land_mask.nc','read',lnd%sg_domain)
     if (.not. success) call error_mesg('realloc_land2cplr','Error opening IS mask file',FATAL)
 
@@ -4017,6 +4012,7 @@ subroutine realloc_land2cplr ( bnd )
     call mpp_pass_SG_to_UG(lnd%ug_domain, bnd%IS_mask_sg,  IS_mask_ug  )
     bnd%IS_mask_ug(:,1)=IS_mask_ug
   endif
+
 end subroutine realloc_land2cplr
 
 ! ============================================================================
@@ -4051,12 +4047,11 @@ subroutine dealloc_land2cplr ( bnd, dealloc_discharges )
      __DEALLOC__( bnd%discharge_snow      )
      __DEALLOC__( bnd%discharge_snow_heat )
      if (IS_enabled.or.IS_calving) then
-       if (IS_enabled) then
-          __DEALLOC__( bnd%IS_adot_sg )
-       endif
-       __DEALLOC__( bnd%IS_mask_sg )
-       __DEALLOC__( bnd%IS_mask_ug )
-       __DEALLOC__( bnd%IS_stock )
+        if (IS_enabled) then
+           __DEALLOC__( bnd%IS_adot_sg )
+        endif
+        __DEALLOC__( bnd%IS_mask_sg )
+        __DEALLOC__( bnd%IS_mask_ug )
      endif
   end if
 
