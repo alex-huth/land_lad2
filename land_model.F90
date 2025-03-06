@@ -206,6 +206,8 @@ logical :: use_coast_topo_rough = .true. ! if false, the topographic roughness s
                                       ! is not used over coastal points
 real    :: precip_warning_tol = -1.0e-18 ! if liquid or solid precip (input
            ! from atmos) is below this value, a warning is printed
+logical :: debug_adot  = .false. ! if true, print the global and hemisphere-specific area-integrated
+                                 ! ice-sheet surface mass flux, and the IS_stock
 
 namelist /land_model_nml/ use_old_conservation_equations, &
                           lm2, give_stock_details, &
@@ -219,7 +221,7 @@ namelist /land_model_nml/ use_old_conservation_equations, &
                           nearest_point_search, print_remapping, &
                           use_coast_rough, coast_rough_mom, coast_rough_heat, &
                           max_coast_frac, use_coast_topo_rough, &
-                          layout, io_layout, mask_table, &
+                          layout, io_layout, mask_table, debug_adot, &
                           precip_warning_tol, npes_io_group, predefined_tiles
 ! ---- end of namelist -------------------------------------------------------
 
@@ -1136,7 +1138,6 @@ subroutine update_land_model_fast ( cplr2land, land2cplr, na)
   runoff = 0 ; runoff_c = 0
 
   IS_adot = 0
-
   ntot = int(time_type_to_real(lnd%dt_slow)/time_type_to_real(lnd%dt_fast))
 
   ! Calculate groundwater and associated heat fluxes between tiles within each gridcell.
@@ -1194,44 +1195,39 @@ subroutine update_land_model_fast ( cplr2land, land2cplr, na)
   call mpp_pass_UG_to_SG(lnd%ug_domain, runoff_c, runoff_c_sg)
   !--- pass IS_adot from unstructured grid to structured grid.
   if (IS_enabled) then
-    if (na==1) then
-      land2cplr%IS_adot_sg = 0.0
-      land2cplr%IS_adot_int = 0.0
-      adot_int_nh=0.0; adot_int_sh=0.0
-    endif
-    IS_adot_sg = 0
+     if (na==1) then
+       land2cplr%IS_adot_sg = 0.0
+       land2cplr%IS_adot_int = 0.0
+       adot_int_nh=0.0; adot_int_sh=0.0
+     endif
+     IS_adot_sg = 0
 
-    call mpp_pass_UG_to_SG(lnd%ug_domain, IS_adot,   IS_adot_sg  )
-    land2cplr%IS_adot_sg = land2cplr%IS_adot_sg + &
-                           IS_adot_sg * time_type_to_real(lnd%dt_fast)/time_type_to_real(lnd%dt_slow)
+     call mpp_pass_UG_to_SG(lnd%ug_domain, IS_adot,   IS_adot_sg  )
+     land2cplr%IS_adot_sg = land2cplr%IS_adot_sg + IS_adot_sg
 
-    !for testing integration without Antarctic hole, lets consider S Hemisphere only
-    IS_adot_sg = land2cplr%IS_adot_sg
+     if (na==ntot) then
+        land2cplr%IS_adot_sg = land2cplr%IS_adot_sg/ntot
+        land2cplr%IS_adot_int = mpp_reproducing_sum(land2cplr%IS_adot_sg * land2cplr%IS_mask_sg * lnd%sg_cellarea)
 
-    !aternate, using is_adot_sg
-    land2cplr%IS_adot_int = land2cplr%IS_adot_int + &
-                            mpp_reproducing_sum(IS_adot_sg * land2cplr%IS_mask_sg * lnd%sg_cellarea) * &
-                            time_type_to_real(lnd%dt_fast)/time_type_to_real(lnd%dt_slow)
+        if (debug_adot) then
+          !N Hemisphere only
+          IS_adot_sg = land2cplr%IS_adot_sg
+          where(lnd%sg_lat<0) IS_adot_sg=0
+          adot_int_nh = mpp_reproducing_sum(IS_adot_sg * lnd%sg_cellarea * land2cplr%IS_mask_sg)
 
-    !N Hemisphere only
-    where(lnd%sg_lat<0) IS_adot_sg=0
-    adot_int_nh = adot_int_nh + mpp_reproducing_sum(IS_adot_sg * lnd%sg_cellarea * land2cplr%IS_mask_sg) * &
-                                time_type_to_real(lnd%dt_fast)/time_type_to_real(lnd%dt_slow)
+          !S Hemisphere only
+          IS_adot_sg = land2cplr%IS_adot_sg
+          where(lnd%sg_lat>=0) IS_adot_sg=0
+          adot_int_sh = mpp_reproducing_sum(IS_adot_sg * lnd%sg_cellarea * land2cplr%IS_mask_sg)
 
-    !S Hemisphere only
-    IS_adot_sg = land2cplr%IS_adot_sg
-    where(lnd%sg_lat>0) IS_adot_sg=0
-    adot_int_sh = adot_int_sh + mpp_reproducing_sum(IS_adot_sg * lnd%sg_cellarea * land2cplr%IS_mask_sg) * &
-                                time_type_to_real(lnd%dt_fast)/time_type_to_real(lnd%dt_slow)
-
-    if (na == ntot) then
-      write (message,*) 'Ice sheet area-int surface mass flux NH  :',adot_int_nh
-      call error_mesg('update_land_model_fast',message,NOTE)
-      write (message,*) 'Ice sheet area-int surface mass flux SH  :',adot_int_sh
-      call error_mesg('update_land_model_fast',message,NOTE)
-      write (message,*) 'Ice sheet area-int surface mass flux Tot :',land2cplr%IS_adot_int
-      call error_mesg('update_land_model_fast',message,NOTE)
-    endif
+          write (message,*) 'Ice sheet area-int surface mass flux NH  :',adot_int_nh
+          call error_mesg('update_land_model_fast',message,NOTE)
+          write (message,*) 'Ice sheet area-int surface mass flux SH  :',adot_int_sh
+          call error_mesg('update_land_model_fast',message,NOTE)
+          write (message,*) 'Ice sheet area-int surface mass flux Tot :',land2cplr%IS_adot_int
+          call error_mesg('update_land_model_fast',message,NOTE)
+        endif
+     endif
   endif
 
   call get_watch_point(iwatch,jwatch,kwatch,face)
@@ -3038,8 +3034,10 @@ case(ISTOCK_WATER)
 
   call mpp_sum(v_IS, pelist=lnd%pelist)
 
-  write (message,*) 'IS stock  :',v_IS
-  call error_mesg('lnd',message,NOTE)
+  if (debug_adot) then
+     write (message,*) 'IS stock  :',v_IS
+     call error_mesg('lnd',message,NOTE)
+  endif
 
 a_globe = 4. * pi * radius**2
 case(ISTOCK_HEAT)
